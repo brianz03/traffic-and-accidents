@@ -1,0 +1,475 @@
+---
+title: "Traffic and Accidents"
+output: 
+  html_document:
+    theme: journal
+    toc: yes
+    toc_float:
+      collapsed: true
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(dev = 'svg')
+```
+
+![](1920px-Toronto_August_2017.jpg) Every day, a significant number of
+Toronto residents depend on automobiles for their daily commute to work,
+accounting for 67% of all commutes, as reported by the 2016 census.
+However, the increasing volume of daily commutes raises concerns
+regarding the potential for serious accidents and their implications for
+overall road safety. This article aims to investigate whether a
+relationship exists between traffic volumes and motor vehicle accidents
+as well as exploring various contributing factors, such as neighborhood
+inequalities and street design, to provide a better understanding of the
+dynamics influencing road safety in Toronto.
+
+# Data
+
+To answer the questions outlined above, I chose to use data available
+from the City of Toronto’s open data portal which includes accident data
+on serious accidents, traffic volumes at intersections and, census data
+on Toronto neighborhoods.
+
+### Killed or Seriously Injured Persons
+
+The Killed or Seriously Injured Persons data set includes all traffic
+collision events where a person was either Killed or Seriously Injured
+(KSI) from 2006 – 2021. Each accident has a row which represents each
+person involved. Information about each accident is also included, with
+columns such as date, location, vehicle, and much more.
+
+### Traffic Volume at Intersections
+
+The City of Toronto also collects data at various intersections across
+the city ordered by decade. The data set includes the traffic volumes at
+intersections segmented by direction of approach, turning movement (if
+applicable), and mode (car, truck, bus, pedestrian, cyclist, other), and
+are divided into 15- minutes time intervals.
+
+As the traffic data is ordered by decade, I chose to use data between
+2010 and 2019 as it was within the range of the KSI data and 2021 and I
+did not feel like doing extra work.
+
+### Census Data
+
+The KSI data only includes information on each accident, neighborhood
+census data was used to determine neighborhood characteristics which may
+increase the risk of collisions.
+
+# Traffic Volume and Collisions
+
+### Methods
+
+In order to determine whether there is a relationship between traffic
+volume and collisions, I calculated the average traffic volume for each
+intersection by finding the average traffic across all available
+categories and time intervals and also calculated the total number of
+accidents at each street/intersection.
+
+The 2 data sets were then joined together to compare intersections
+volume and accident numbers. Intersections in the KSI data were stored
+in 2 columns "STREET1" and "STREET2" and the intersections from the
+traffic data were in the form “STREET1 AT STREET2”. Out of 3937
+intersections, around 656 of them were joined with the crash data as
+many of the intersections had different names compared to the crash data
+or did not exist.
+
+### Analysis
+
+#### Traffic Volume and Collisions
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+options(scipen=999)
+library(tidyverse)
+library(readxl)
+library(reshape2)
+library(sf)
+library(htmlwidgets)
+library(leaflet)
+library(ggpubr)
+library(hrbrthemes)
+library(kableExtra)
+library(slickR)
+# load traffic data
+traffic_and_collisions = read.csv('traffic_and_collisions.csv')
+
+# regression model with accidents and traffic volume
+model = lm(count~avg_volume, data=traffic_and_collisions)
+
+
+ggplot(traffic_and_collisions, aes(x = avg_volume, y = count)) + 
+  geom_point(size = 3, shape = 21, color = "black", fill = "blue") +
+  geom_abline(linewidth=1.5,slope=model$coefficients[2], intercept=model$coefficients[1]) +
+  stat_cor(p.accuracy = 0.05, r.accuracy = 0.001)  +
+  xlab('Average Intersection Volume') +ylab('Number of Collisions') + 
+  labs( title = "Traffic Volume vs Collisions at Intersections"
+        , caption = "Figure 1: Plot of Traffic Volume and Collisions") + theme_ipsum() 
+
+```
+
+Figure 1 shows a linear regression model with only total accidents and
+traffic volume. Evidence from the model suggests that there is a small
+but significant relationship between traffic volume and serious
+accidents.
+
+While traffic volume appears to be related to serious accidents, the low
+correlation suggests that there are many other factors that could
+influence accidents. In addition, traffic volumes were calculated as the
+average per intersection and do not account for the time of day, vehicle
+type, direction, and turning movement which may affect the number of
+accidents.
+
+Clearly, we can see that there are more factors to serious traffic
+accidents than just traffic volume. Within the KSI dataset, there are
+also many other factors included for each entry.
+
+# Street Design
+
+### Methods
+
+To assess the impact of road design, collision counts within the KSI
+data set were categorized based on various factors included with each
+incident.
+
+### Analysis
+
+#### Accident Location
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+ksi = read_sf('Motor Vehicle Collisions with KSI Data - 4326.shp')
+names = read.csv('Motor Vehicle Collisions with KSI Data fields.csv')
+# get coordinates
+coords = as.data.frame(st_coordinates(ksi))
+ksi = as.data.frame(ksi)
+ksi$X = coords$X
+ksi$Y = coords$Y
+colnames(ksi ) = c(names$name, 'geometry','X', "Y")
+
+loccoord_accloc = ksi %>% 
+  group_by(LOCCOORD, ACCLOC) %>% 
+  summarise(Count=n()) %>% 
+  arrange(desc(Count)) %>% 
+  head(10)
+names(loccoord_accloc)<-c("Location Coordinate","Accident Location", "Count")
+
+loccoord_accloc %>%
+  kbl() %>%
+  kable_paper("hover", full_width = F) %>% 
+  footnote(general = "Table 1: accident counts by location coordinate and location")
+```
+
+From the table, we can see that most accidents occur at intersections
+followed by mid-block accidents. Strangely, there are also a number of
+accidents listed with no accident location but a location coordinate so
+I then grouped by only location coordinate.
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+loccoord = ksi %>% 
+  group_by(LOCCOORD) %>% 
+  summarise(Count=n()) %>% 
+  arrange(desc(Count))
+
+df = data.frame('Other',sum(loccoord$Count[3:8]))
+names(df)<-c("LOCCOORD","Count")
+loccoord = rbind(loccoord, df)
+loccoord = loccoord[-c(3:8), ]  
+names(loccoord)<-c("Location Coordinate", "Count")
+
+loccoord %>%
+  kbl() %>% 
+  kable_paper("hover", full_width = F) %>% 
+  footnote(general = "Table 2: accident counts by location coordinate")
+
+```
+
+From this, we come to the same conclusion that intersections and
+intersection related accidents are most common followed by mid-block
+accidents.
+
+#### Traffic Control and Road Type
+
+We can clearly see that most accidents occur at intersections, but does
+the type of traffic control and road type affect the number of
+accidents?
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+TF_CTL = ksi %>% 
+  group_by(TRAFFCTL, ROAD_CLASS) %>% 
+  summarise(count=n()) %>% 
+  arrange(desc(count)) %>% 
+  head(10)
+names(TF_CTL)<-c("Traffic Control","Road Class", "Count")
+
+TF_CTL %>%
+  kbl() %>% 
+  kable_paper("hover", full_width = F) %>% 
+  footnote(general = "Table 3: accident counts by traffic control type and road class")
+
+```
+
+From the table, most accidents occur along and at signalized
+intersections along major arterial roads. We can also see a noticeable
+drop off from major arterials to minor arterials.
+
+One potential reason for the higher number of accidents is the higher
+volume and elevated speed limit on major arterial roads. The City of
+Toronto classifies major arterials as being able to support over 20
+thousand vehicles compared to the 8-20 thousand for minor arterials. In
+addition, the speed limit on major arterials is slightly higher ranging
+from 50-60km/h compared to 40-60km/h suggesting these factors may
+contribute to increased risk of accidents.
+
+# Neighborhood Inequalities
+
+### Methods
+
+Lastly, to explore the effects neighborhood inequalities on motor
+vehicle accidents, I obtained collision counts for each neighborhood and
+joined them with their respective neighborhood within the Toronto census
+data.
+
+### Analysis
+
+Social inequalities and other neighborhood characteristics may play a
+role in serious motor vehicle accidents. To find out, I first made a map
+plotting the number of accidents by neighborhood.
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+nb_counts = read.csv("nb_counts.csv")
+nb_counts$X = NULL
+# load shapefile for neighborhood boundaries
+neighborhoods = read_sf('Neighbourhoods - 4326.shp')
+neighborhoods = merge(nb_counts,neighborhoods, by.x = 'NEIGHBOURHOOD_158', by.y = 'AREA_NA7')
+
+neighborhoods = st_as_sf(subset(neighborhoods, select = -c(4,8:17) ))
+
+# create map of neighborhoods and accidents
+bins <- c(0, 100, 200, 300, 400, 500, Inf)
+pal <- colorBin("viridis", domain = neighborhoods$count, bins = bins)
+
+labels <- sprintf(
+  "%s</strong><br/>%g Collisions",
+  neighborhoods$NEIGHBOURHOOD_158, neighborhoods$count
+) %>% lapply(htmltools::HTML)
+
+
+leaflet(neighborhoods) %>%
+  addPolygons( fillColor = ~pal(count), 
+               stroke=TRUE,
+               fillOpacity = 0.7,
+               weight = 2,
+               opacity = 0.7,
+               color = "black",
+               dashArray = "3",
+               highlightOptions = highlightOptions(
+                 weight = 5,
+                 color = "white",
+                 dashArray = "",
+                 bringToFront = TRUE),
+               label = labels
+               ) %>% 
+   addLegend(pal = pal, values = ~count, opacity = 0.7, title = 'Count',
+                position = "bottomright") %>% 
+   addProviderTiles(providers$CartoDB.Positron)
+
+```
+
+From the map, we can see that neighborhoods in Downtown Toronto appear
+to have high numbers of traffic accidents which seems to be as expected
+considering the number of people who commute or live downtown.
+Interestingly, collisions in neighborhoods surrounding Downtown Toronto
+appear to decrease with collisions increasing in neighborhoods further
+away from the city.
+
+After looking at the map, I decided to look at census data to compare
+with the total accident counts. As there are way too many census
+variables, I looked at 2 which I thought would be related to the
+accident counts.
+
+#### Household Income
+
+```{r , echo=FALSE, warning=FALSE, message=FALSE}
+income = lm(neighborhoods$count ~ neighborhoods$af_tax_inc)
+ggplot(neighborhoods, aes(x = af_tax_inc, y = count)) + 
+  geom_point(size = 3, shape = 21, color = "black", fill = "blue") +
+  geom_abline(linewidth=1.5,slope=income$coefficients[2], intercept=income$coefficients[1]) +
+  stat_cor(p.accuracy = 0.05, r.accuracy = 0.001) +
+  xlab('Average After-Tax Household Income') + 
+  labs( title = "Household Income vs Accidents"
+        , caption = "Figure 2: plot of accidents and household income") + theme_ipsum() 
+
+```
+
+The plot above shows a negative relationship between household income
+and number of collisions. While average income among neighborhoods
+appears to be related to lower accident numbers, there are very few high
+income neighborhoods and a lot of variation among the neighborhoods of
+average income suggesting household income may not be a very strong
+predictor of neighborhood collisions.
+
+#### Public Transit Usage
+
+I then decided to look at public transit usage and accidents as public
+transit users often need to cross a major intersection to get to a bus
+stop or subway station which increase their risk of being struck by a
+motor vehicle.
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE }
+transit = lm(neighborhoods$count~ neighborhoods$public_transit)
+ggplot(neighborhoods, aes(x = public_transit, y = count)) + 
+  geom_point(size = 3, shape = 21, color = "black", fill = "blue") +
+  geom_abline(linewidth=1.5,slope=transit$coefficients[2], intercept=transit$coefficients[1]) +
+  stat_cor(p.accuracy = 0.05, r.accuracy = 0.001)  +
+  xlab('# of Public Transit Commuters') +ylab('Number of Collisions') + 
+  labs( title = "Public Transit Usage vs Accidents"
+        , caption = "Figure 3: plot of public transit usage and accidents") + theme_ipsum() 
+
+```
+
+Plotting the number of transit commuters and accidents we can see a
+moderate correlation between the 2 variables suggesting there may be a
+relationship between public transit users and accidents.
+
+# Case Study
+
+One neighborhood that stood out was the West Humber-Claireville which
+was an outlier in both plots. The neighborhood also had a significantly
+higher number of accidents at 579 compared to the neighborhood with the
+second highest number of accidents which was the Yonge-Bay corridor
+neighborhood at 375. From figure 4 below, even accounting for
+differences in population, we can see that the West Humber-Claireville
+neighborhood still has a much higher than expected number of collisions.
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE }
+pop = lm(neighborhoods$count~ neighborhoods$pop)
+ggplot(neighborhoods, aes(x = pop, y = count)) + 
+  geom_point(size = 3, shape = 21, color = "black", fill = "blue") +
+  geom_abline(linewidth=1.5,slope=pop$coefficients[2], intercept=pop$coefficients[1]) +
+  stat_cor(p.accuracy = 0.05, r.accuracy = 0.001) +
+  xlab('Population') +ylab('Number of Collisions') + 
+  labs( title = "Neighborhood Population vs Accidents"
+        , caption = "Figure 4: neighborhood population and accidents") + theme_ipsum() 
+```
+
+One other outlier was the Yonge-Bay corridor neighborhood. Although the
+neighborhood had a high number of accidents, the low population may
+suggest the census data may not be accurately representing accidents in
+the neighborhood as Yonge-Bay corridor is located within Toronto’s
+financial district where not many people live. Because of this, I
+decided to examine the West Humber-Claireville neighborhood further.
+
+```{r , echo=FALSE, warning=FALSE, message=FALSE}
+ksi %>% 
+  filter(HOOD_158 == 1) %>% 
+  group_by(STREET1,STREET2) %>% 
+  summarise(c=n()) %>%
+  arrange(desc(c)) %>% 
+  head(10) %>% 
+  `colnames<-`(c("Street ", "Street 2", "Count"))%>%
+  kbl() %>% 
+  kable_paper("hover", full_width = F) %>% 
+  footnote(general = "Table 4: Top 10 accident locations in West-Humber Claireville")
+
+WHC = ksi %>% 
+  filter(HOOD_158 == 1) 
+
+WHC = st_as_sf(WHC)
+
+
+labels2 <- sprintf(
+  "Street 1: %s</strong><br/>Street 2: %s",
+  WHC$STREET1, WHC$STREET2
+) %>% lapply(htmltools::HTML)
+
+leaflet(WHC) %>% addTiles() %>%
+  addMarkers(lng = ~X, lat = ~Y,clusterOptions = markerClusterOptions(),
+             label = labels2)%>% 
+  addProviderTiles(providers$CartoDB.Positron) %>% 
+  addPolygons(data= neighborhoods[140,]$geometry, 
+              stroke=TRUE,
+              fillOpacity = 0,
+              weight = 2,
+              opacity = 1,
+              color = "black",
+              dashArray = "3")
+
+
+```
+
+As many of the data points are stacked on top of each other, I created a
+table and also created a map grouping the points into clusters to see if
+certain areas had a higher number of accidents. From the table, the 2
+areas with the highest number of accidents appear to be between Humber
+College Blvd and Highway 27 N, and between Rexdale Blvd and Queen Plate
+Drive.
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+imgs <-  c('img1.png','img2.png','img3.png','img4.png')
+slickR(obj = imgs) + settings(dots = TRUE)
+
+
+```
+
+<br />
+
+From the images above, we can see potentially some reasons for the high number of accidents. Humber College Blvd and Highway 27 N appears to be a very busy intersection with a hospital and plaza on one side and a college on the other. In addition, there are a large number of pedestrians which can be seen crossing the road. One other factor which may contribute to the number of accidents is the above average speed limit ranging from 70-80km/h, 10-20km/h higher than most major arterial roads.
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+imgs2 <-  c('img5.png','img6.png','img7.png','img8.png','img9.png','img10.png')
+slickR(obj = imgs2)  + settings(dots = TRUE)
+
+```
+
+<br />
+<br />
+<br />
+<br />
+<br />
+<br />
+
+The area with the second highest number of accidents was between Rexdale
+Blvd and Queens Plate Dr which I thought was surprising as the area
+nearby does not appear to be very developed. One explanation for the
+high number of accidents may be related to the condos located nearby. As
+the condos are located across the street from a casino and horse racing
+track, residents who want to go would have to cross the street each
+time. The condos also may have a large disabled, elderly population who
+may be at greater risk of serious injury as gambling and horse racing
+tend to be popular among older demographics.
+
+# Conclusion
+
+While there appears to be a modest relationship between traffic volume
+and accident rates. Intersection design, road type, and traffic control
+appear to play a major role in the likelihood of accidents. Disparities
+in accidents also exist among neighborhoods, with downtown neighborhoods
+and suburbs far from the city center exhibiting higher accident numbers
+highlighting potential socio-economic factors at play. The case study of
+the West Humber-Claireville neighborhood shows the importance of
+considering local context, with neighboring land use appearing to play a
+role in accidents. These findings highlight a potential need for better
+road design with a focus around intersections along major arterial roads
+and for better accommodations for vulnerable road users.
+
+# Ethics
+
+#### Privacy
+
+The KSI data includes information on each person involved in a crash
+which includes: age, date, and location among other factors which could
+potentially be used to identify the individuals involved.
+
+#### Methodology
+
+As discussed above, the method of determining the relationship between
+traffic volume and accidents may not be very accurate. The data for
+traffic volume used did not include the time between 2006-2009 or
+2020-2021. In addition, as the data for accidents was separate from the
+traffic data, the 2 datasets had to be joined together with a number of
+intersections not being represented. One other potential error could be
+the method used to determine accidents at each intersection as the
+accident counts at each intersection also include accidents that happen
+nearby which may have affected the final results.
